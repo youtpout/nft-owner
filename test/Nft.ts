@@ -1,124 +1,158 @@
-import { time, loadFixture } from "@nomicfoundation/hardhat-network-helpers";
-import { anyValue } from "@nomicfoundation/hardhat-chai-matchers/withArgs";
 import { expect } from "chai";
 import { ethers } from "hardhat";
+import { Player, Weapon } from "../typechain-types";
+import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
+import { BigNumber } from "ethers";
+import { TransferEvent } from "../typechain-types/contracts/Player";
 
 describe("Nft", function () {
+  var weaponContract: Weapon;
+  var playerContract: Player;
+  var owner: SignerWithAddress, bob: SignerWithAddress, alice: SignerWithAddress;
+
   // We define a fixture to reuse the same setup in every test.
   // We use loadFixture to run this setup once, snapshot that state,
   // and reset Hardhat Network to that snapshot in every test.
-  async function deployNft() {
-    const ONE_YEAR_IN_SECS = 365 * 24 * 60 * 60;
-    const ONE_GWEI = 1_000_000_000;
-
-    const lockedAmount = ONE_GWEI;
-    const unlockTime = (await time.latest()) + ONE_YEAR_IN_SECS;
+  beforeEach(async function () {
 
     // Contracts are deployed using the first signer/account by default
-    const [owner, otherAccount] = await ethers.getSigners();
+    [owner, bob, alice] = await ethers.getSigners();
 
-    const Lock = await ethers.getContractFactory("Lock");
-    const lock = await Lock.deploy(unlockTime, { value: lockedAmount });
+    const Weapon = await ethers.getContractFactory("Weapon");
+    weaponContract = await Weapon.deploy();
 
-    return { lock, unlockTime, lockedAmount, owner, otherAccount };
-  }
+    const Player = await ethers.getContractFactory("Player");
+    playerContract = await Player.deploy(weaponContract.address);
 
-  describe("Deployment", function () {
-    it("Should set the right unlockTime", async function () {
-      const { lock, unlockTime } = await loadFixture(deployOneYearLockFixture);
+  });
 
-      expect(await lock.unlockTime()).to.equal(unlockTime);
+  describe("Equip weapon", function () {
+    it("Mint and equip", async function () {
+      let weaponId = 2;
+      // mint a wepon
+      await weaponContract.mint(bob.address, weaponId, 1, []);
+      // mint a player
+      let tx = await playerContract.safeMint(bob.address, "https://azk.imgix.net/images/903cd61d-61f7-4e7f-baba-5c45da46868f.png?dpr=1&w=1024");
+      let result = await tx.wait();
+
+      let eventTransfer = result.events?.find((x) => { return x.event == "Transfer" }) as TransferEvent;
+      let playerId = eventTransfer.args.tokenId;
+
+      // encode playerId to use safetransfer data
+      const data = ethers.utils.defaultAbiCoder.encode(["uint256"], [playerId]);
+      // safe transfer to player
+      await weaponContract.connect(bob).safeTransferFrom(bob.address, playerContract.address, weaponId, 1, data);
+
+      let getWeaponEquiped = await playerContract.weaponEquiped(playerId);
+      expect(getWeaponEquiped).equal(weaponId);
+
+      let getWeaponName = await weaponContract.weaponName(getWeaponEquiped);
+      expect(getWeaponName).equal("Bow");
+      console.log("weapon equiped", getWeaponName);
     });
 
-    it("Should set the right owner", async function () {
-      const { lock, owner } = await loadFixture(deployOneYearLockFixture);
+    it("Transfer to another player", async function () {
+      let weaponId = 2;
+      // mint a wepon
+      await weaponContract.mint(bob.address, weaponId, 1, []);
+      // mint a player
+      let tx = await playerContract.safeMint(bob.address, "https://azk.imgix.net/images/903cd61d-61f7-4e7f-baba-5c45da46868f.png?dpr=1&w=1024");
+      let result = await tx.wait();
 
-      expect(await lock.owner()).to.equal(owner.address);
+      let eventTransfer = result.events?.find((x) => { return x.event == "Transfer" }) as TransferEvent;
+      let playerId = eventTransfer.args.tokenId;
+
+      let owner = await playerContract.ownerOf(playerId);
+      expect(owner).equal(bob.address);
+
+      // encode playerId to use safetransfer data
+      const data = ethers.utils.defaultAbiCoder.encode(["uint256"], [playerId]);
+      // safe transfer to player
+      await weaponContract.connect(bob).safeTransferFrom(bob.address, playerContract.address, weaponId, 1, data);
+
+      // transfer player to alice
+      await playerContract.connect(bob).transferFrom(bob.address, alice.address, playerId);
+
+      let getWeaponEquiped = await playerContract.weaponEquiped(playerId);
+      expect(getWeaponEquiped).equal(weaponId);
+
+      let getWeaponName = await weaponContract.weaponName(getWeaponEquiped);
+      expect(getWeaponName).equal("Bow");
+
+      owner = await playerContract.ownerOf(playerId);
+      expect(owner).equal(alice.address);
     });
 
-    it("Should receive and store the funds to lock", async function () {
-      const { lock, lockedAmount } = await loadFixture(
-        deployOneYearLockFixture
-      );
+    it("Equip manually and delink", async function () {
+      let weaponId = 3;
+      // mint a wepon
+      await weaponContract.mint(bob.address, weaponId, 1, []);
+      let weaponBalance = await weaponContract.balanceOf(bob.address, weaponId);
+      expect(weaponBalance).equal(1);
 
-      expect(await ethers.provider.getBalance(lock.address)).to.equal(
-        lockedAmount
-      );
+      // mint a player
+      let tx = await playerContract.safeMint(bob.address, "https://azk.imgix.net/images/903cd61d-61f7-4e7f-baba-5c45da46868f.png?dpr=1&w=1024");
+      let result = await tx.wait();
+
+      let eventTransfer = result.events?.find((x) => { return x.event == "Transfer" }) as TransferEvent;
+      let playerId = eventTransfer.args.tokenId;
+
+      // approve player contract
+      await weaponContract.connect(bob).setApprovalForAll(playerContract.address, true);
+      // equip
+      await playerContract.connect(bob).equipWeapon(weaponId, 1);
+
+      weaponBalance = await weaponContract.balanceOf(bob.address, weaponId);
+      expect(weaponBalance).equal(0);
+
+      let getWeaponEquiped = await playerContract.weaponEquiped(playerId);
+      expect(getWeaponEquiped).equal(weaponId);
+
+      let getWeaponName = await weaponContract.weaponName(getWeaponEquiped);
+      expect(getWeaponName).equal("Gun");
+      console.log("weapon equiped", getWeaponName);
+
+      // unequip weapon
+      await playerContract.connect(bob).unequipWeapon(playerId);
+
+      weaponBalance = await weaponContract.balanceOf(bob.address, weaponId);
+      expect(weaponBalance).equal(1);
     });
 
-    it("Should fail if the unlockTime is not in the future", async function () {
-      // We don't use the fixture here because we want a different deployment
-      const latestTime = await time.latest();
-      const Lock = await ethers.getContractFactory("Lock");
-      await expect(Lock.deploy(latestTime, { value: 1 })).to.be.revertedWith(
-        "Unlock time should be in the future"
-      );
+    it("Can't equip 2 weapons", async function () {
+      let weaponId = 3;
+      let secondWeapon = 1;
+      // mint weapons
+      await weaponContract.mint(bob.address, weaponId, 1, []);
+      await weaponContract.mint(bob.address, secondWeapon, 1, []);
+
+      // mint a player
+      let tx = await playerContract.safeMint(bob.address, "https://azk.imgix.net/images/903cd61d-61f7-4e7f-baba-5c45da46868f.png?dpr=1&w=1024");
+      let result = await tx.wait();
+
+      let eventTransfer = result.events?.find((x) => { return x.event == "Transfer" }) as TransferEvent;
+      let playerId = eventTransfer.args.tokenId;
+
+      // approve player contract
+      await weaponContract.connect(bob).setApprovalForAll(playerContract.address, true);
+      // equip
+      await playerContract.connect(bob).equipWeapon(weaponId, 1);
+
+      let getWeaponEquiped = await playerContract.weaponEquiped(playerId);
+      expect(getWeaponEquiped).equal(weaponId);
+
+      let getWeaponName = await weaponContract.weaponName(getWeaponEquiped);
+      expect(getWeaponName).equal("Gun");
+      console.log("weapon equiped", getWeaponName);
+
+      // we test the error
+      let equipTx = playerContract.connect(bob).equipWeapon(secondWeapon, 1);
+      await expect(equipTx).to.be.revertedWith("Already a weapon equiped");
+
     });
   });
 
-  describe("Withdrawals", function () {
-    describe("Validations", function () {
-      it("Should revert with the right error if called too soon", async function () {
-        const { lock } = await loadFixture(deployOneYearLockFixture);
 
-        await expect(lock.withdraw()).to.be.revertedWith(
-          "You can't withdraw yet"
-        );
-      });
 
-      it("Should revert with the right error if called from another account", async function () {
-        const { lock, unlockTime, otherAccount } = await loadFixture(
-          deployOneYearLockFixture
-        );
 
-        // We can increase the time in Hardhat Network
-        await time.increaseTo(unlockTime);
-
-        // We use lock.connect() to send a transaction from another account
-        await expect(lock.connect(otherAccount).withdraw()).to.be.revertedWith(
-          "You aren't the owner"
-        );
-      });
-
-      it("Shouldn't fail if the unlockTime has arrived and the owner calls it", async function () {
-        const { lock, unlockTime } = await loadFixture(
-          deployOneYearLockFixture
-        );
-
-        // Transactions are sent using the first signer by default
-        await time.increaseTo(unlockTime);
-
-        await expect(lock.withdraw()).not.to.be.reverted;
-      });
-    });
-
-    describe("Events", function () {
-      it("Should emit an event on withdrawals", async function () {
-        const { lock, unlockTime, lockedAmount } = await loadFixture(
-          deployOneYearLockFixture
-        );
-
-        await time.increaseTo(unlockTime);
-
-        await expect(lock.withdraw())
-          .to.emit(lock, "Withdrawal")
-          .withArgs(lockedAmount, anyValue); // We accept any value as `when` arg
-      });
-    });
-
-    describe("Transfers", function () {
-      it("Should transfer the funds to the owner", async function () {
-        const { lock, unlockTime, lockedAmount, owner } = await loadFixture(
-          deployOneYearLockFixture
-        );
-
-        await time.increaseTo(unlockTime);
-
-        await expect(lock.withdraw()).to.changeEtherBalances(
-          [owner, lock],
-          [lockedAmount, -lockedAmount]
-        );
-      });
-    });
-  });
 });

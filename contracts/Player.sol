@@ -29,8 +29,8 @@ contract Player is
     }
 
     function safeMint(address to, string memory uri) public onlyOwner {
-        uint256 tokenId = _tokenIdCounter.current();
         _tokenIdCounter.increment();
+        uint256 tokenId = _tokenIdCounter.current();
         _safeMint(to, tokenId);
         _setTokenURI(tokenId, uri);
     }
@@ -66,7 +66,7 @@ contract Player is
 
     // we will use erc1155 receiver to attach a weapon
     function onERC1155Received(
-        address operator,
+        address,
         address from,
         uint256 id,
         uint256 value,
@@ -75,14 +75,14 @@ contract Player is
         // prevent from attach multiple weapons
         require(value == 1, "Incorrect amount");
         // check if the operator is the weapon contract
-        require(operator == address(weaponContract), "Not weapon contract");
+        require(msg.sender == address(weaponContract), "Not weapon contract");
         // decode the nft receiver
-        uint256 idReceiver = abi.decode(data, (uint256));
+        uint256 playerId = abi.decode(data, (uint256));
         require(
-            ownerOf(idReceiver) == from,
+            ownerOf(playerId) == from,
             "Only the player owner can equip his weapon"
         );
-        _linkWeapon(id, idReceiver);
+        _linkWeapon(id, playerId);
         return this.onERC1155Received.selector;
     }
 
@@ -99,18 +99,35 @@ contract Player is
     }
 
     // method the link the weapon to the player
-    function _linkWeapon(uint256 id, uint256 idReceiver) internal {
-        require(weaponEquiped[idReceiver] == 0, "Already a weapon equiped");
+    function _linkWeapon(uint256 id, uint256 playerId) internal {
+        require(weaponEquiped[playerId] == 0, "Already a weapon equiped");
         // we attach the weapon to the player
-        weaponEquiped[idReceiver] = id;
+        weaponEquiped[playerId] = id;
     }
 
-    // If the player want to equip the weapon directly from this contract 
+    // If the player want to equip the weapon directly from this contract
     // he needs to approve this contract before in the weapon contract
-    function equipWeapon(uint256 id, uint256 idReceiver) external {
-        require(ownerOf(idReceiver) == msg.sender, "You are not the owner");
-        bytes memory data = abi.encode(idReceiver);
+    function equipWeapon(uint256 id, uint256 playerId) external {
+        require(ownerOf(playerId) == msg.sender, "You are not the owner");
+        bytes memory data = abi.encode(playerId);
         // we use safe transfer from to pass data and ensure to call onERC1155Received
         weaponContract.safeTransferFrom(msg.sender, address(this), id, 1, data);
+    }
+
+    // If the player want to unequip the weapon
+    function unequipWeapon(uint256 playerId) external {
+        require(ownerOf(playerId) == msg.sender, "You are not the owner");
+        uint256 weaponId = weaponEquiped[playerId];
+        require(weaponId > 0, "No weapon equiped");
+        // transfer weapon to the player
+        weaponContract.safeTransferFrom(
+            address(this),
+            msg.sender,
+            weaponId,
+            1,
+            ""
+        );
+        // remove weaponInfo
+        weaponEquiped[playerId] = 0;
     }
 }

@@ -11,12 +11,14 @@ contract Weapon is ERC1155, Ownable {
         weaponName[3] = "Gun";
     }
 
-    mapping(uint256 => string) weaponName;
+    // store the name of the weapon
+    mapping(uint256 => string) public weaponName;
 
     function setURI(string memory newuri) public onlyOwner {
         _setURI(newuri);
     }
 
+    // add or edit a weapon name
     function setWeaponName(uint256 id, string calldata name) public onlyOwner {
         weaponName[id] = name;
     }
