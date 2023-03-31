@@ -151,8 +151,4 @@ describe("Nft", function () {
 
     });
   });
-
-
-
-
 });
